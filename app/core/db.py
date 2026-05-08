@@ -80,8 +80,8 @@ def init_db() -> sessionmaker:
     with engine.begin() as conn:
         cols = {row[1] for row in conn.execute(text("PRAGMA table_info(nodes)"))}
         if "node_version" not in cols:
-            conn.execute(text("ALTER TABLE nodes ADD COLUMN node_version VARCHAR(32) DEFAULT 'N0.0.2'"))
-            conn.execute(text("UPDATE nodes SET node_version = 'N0.0.2' WHERE node_version IS NULL OR node_version = ''"))
+            conn.execute(text("ALTER TABLE nodes ADD COLUMN node_version VARCHAR(32) DEFAULT 'N0.0.3'"))
+            conn.execute(text("UPDATE nodes SET node_version = 'N0.0.3' WHERE node_version IS NULL OR node_version = ''"))
 
     return sessionmaker(bind=engine)
 
