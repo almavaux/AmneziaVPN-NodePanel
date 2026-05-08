@@ -347,6 +347,7 @@ def _build_amnezia_vpn_config(
     *,
     client_name: str,
     client_private_key: str,
+    client_public_key: str,
     client_ip: str,
     server_pubkey: str,
     psk: str,
@@ -388,6 +389,66 @@ def _build_amnezia_vpn_config(
         "I4": special_junk.get("I4", ""),
         "I5": special_junk.get("I5", ""),
     }
+
+    client_ip_plain = client_ip.split("/", 1)[0]
+    template_lines = [
+        "[Interface]",
+        f"Address = {client_ip}",
+        "DNS = $PRIMARY_DNS, $SECONDARY_DNS",
+        f"PrivateKey = {client_private_key}",
+        f"Jc = {client_payload['Jc']}",
+        f"Jmin = {client_payload['Jmin']}",
+        f"Jmax = {client_payload['Jmax']}",
+        f"S1 = {client_payload['S1']}",
+        f"S2 = {client_payload['S2']}",
+        f"S3 = {client_payload['S3']}",
+        f"S4 = {client_payload['S4']}",
+    ]
+    for key in ("H1", "H2", "H3", "H4"):
+        if key in client_payload and client_payload[key]:
+            template_lines.append(f"{key} = {client_payload[key]}")
+    for key in ("I1", "I2", "I3", "I4", "I5"):
+        template_lines.append(f"{key} = {client_payload.get(key, '')}")
+    template_lines += [
+        "",
+        "[Peer]",
+        f"PublicKey = {server_pubkey}",
+        f"PresharedKey = {psk}",
+        "AllowedIPs = 0.0.0.0/0, ::/0",
+        f"Endpoint = {settings.server_host}:{iface['ListenPort']}",
+        "PersistentKeepalive = 25",
+    ]
+    template_config = "\n".join(template_lines) + "\n"
+    nested_last_config = {
+        "H1": client_payload.get("H1", ""),
+        "H2": client_payload.get("H2", ""),
+        "H3": client_payload.get("H3", ""),
+        "H4": client_payload.get("H4", ""),
+        "I1": client_payload["I1"],
+        "I2": client_payload["I2"],
+        "I3": client_payload["I3"],
+        "I4": client_payload["I4"],
+        "I5": client_payload["I5"],
+        "Jc": client_payload["Jc"],
+        "Jmax": client_payload["Jmax"],
+        "Jmin": client_payload["Jmin"],
+        "S1": client_payload["S1"],
+        "S2": client_payload["S2"],
+        "S3": client_payload["S3"],
+        "S4": client_payload["S4"],
+        "allowed_ips": ["0.0.0.0/0", "::/0"],
+        "clientId": client_public_key,
+        "client_ip": client_ip_plain,
+        "client_priv_key": client_private_key,
+        "client_pub_key": client_public_key,
+        "config": template_config,
+        "hostName": settings.server_host,
+        "mtu": str(iface.get("MTU", "1280")),
+        "persistent_keep_alive": "25",
+        "port": int(iface["ListenPort"]),
+        "psk_key": psk,
+        "server_pub_key": server_pubkey,
+    }
     protocol_payload = {
         "H1": client_payload.get("H1", ""),
         "H2": client_payload.get("H2", ""),
@@ -405,7 +466,7 @@ def _build_amnezia_vpn_config(
         "S2": client_payload["S2"],
         "S3": client_payload["S3"],
         "S4": client_payload["S4"],
-        "last_config": raw_config,
+        "last_config": json.dumps(nested_last_config, ensure_ascii=False, indent=4),
         "port": str(iface["ListenPort"]),
         "protocol_version": "2",
         "subnet_address": _extract_subnet_address(str(iface.get("Address", ""))),
@@ -565,6 +626,7 @@ def create_user(data: UserCreate) -> tuple[UserData, str, bytes]:
         config_text = _build_amnezia_vpn_config(
             client_name=data.name,
             client_private_key=private_key,
+            client_public_key=public_key,
             client_ip=new_ip,
             server_pubkey=server_pubkey,
             psk=psk,
@@ -659,6 +721,7 @@ def get_user_config(client_id: str) -> Optional[str]:
     config_text = _build_amnezia_vpn_config(
         client_name=client_name,
         client_private_key=private_key,
+        client_public_key=client_id,
         client_ip=client_ip,
         server_pubkey=server_pubkey,
         psk=psk or "",
