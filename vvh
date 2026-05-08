@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_DIR="/opt/awg-api"
+REPO_URL="https://github.com/almavaux/AmneziaVPN-NodePanel.git"
+
+usage() {
+  cat <<EOF
+vespervauxhall (vvh)
+
+Usage:
+  vvh menu
+  vvh install
+  vvh update
+  vvh reinstall
+  vvh uninstall
+  vvh status
+  vvh logs
+
+Notes:
+  - install   = full install
+  - update    = safe update (keeps .env and state)
+  - reinstall = full clean reinstall
+EOF
+}
+
+run_deploy() {
+  local mode="$1"
+  if [ ! -x "$APP_DIR/deploy.sh" ]; then
+    echo "deploy.sh not found locally, using GitHub bootstrap..."
+    curl -fsSL "https://raw.githubusercontent.com/almavaux/AmneziaVPN-NodePanel/main/deploy.sh" | bash -s -- "$mode"
+    return
+  fi
+  bash "$APP_DIR/deploy.sh" "$mode" --repo "$REPO_URL" --dir "$APP_DIR"
+}
+
+do_uninstall() {
+  echo "==> Uninstalling panel"
+  if [ -f "$APP_DIR/docker/docker-compose.yml" ]; then
+    docker compose -f "$APP_DIR/docker/docker-compose.yml" down --remove-orphans || true
+  fi
+  docker rm -f awg-api >/dev/null 2>&1 || true
+  rm -rf "$APP_DIR"
+  echo "Done. /opt/awg-api removed."
+}
+
+do_status() {
+  if [ -f "$APP_DIR/docker/docker-compose.yml" ]; then
+    docker compose -f "$APP_DIR/docker/docker-compose.yml" ps || true
+  else
+    docker ps --filter "name=awg-api" || true
+  fi
+  echo ""
+  curl -fsS http://127.0.0.1:8000/health || true
+  echo ""
+}
+
+do_logs() {
+  docker logs --tail 100 -f awg-api
+}
+
+menu() {
+  while true; do
+    echo ""
+    echo "=== vespervauxhall (vvh) ==="
+    echo "1) Install panel"
+    echo "2) Update panel"
+    echo "3) Reinstall panel (clean)"
+    echo "4) Uninstall panel"
+    echo "5) Status"
+    echo "6) Logs"
+    echo "7) Exit"
+    read -r -p "Select option [1-7]: " answer
+    case "$answer" in
+      1) run_deploy install ;;
+      2) run_deploy update ;;
+      3) run_deploy install ;;
+      4) do_uninstall ;;
+      5) do_status ;;
+      6) do_logs ;;
+      7) exit 0 ;;
+      *) echo "Unknown option" ;;
+    esac
+  done
+}
+
+main() {
+  local cmd="${1:-menu}"
+  case "$cmd" in
+    menu) menu ;;
+    install) run_deploy install ;;
+    update) run_deploy update ;;
+    reinstall) run_deploy install ;;
+    uninstall) do_uninstall ;;
+    status) do_status ;;
+    logs) do_logs ;;
+    -h|--help|help) usage ;;
+    *)
+      echo "Unknown command: $cmd" >&2
+      usage
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"

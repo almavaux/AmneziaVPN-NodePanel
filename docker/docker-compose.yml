@@ -1,0 +1,25 @@
+services:
+  awg-api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: awg-api
+    restart: unless-stopped
+    ports:
+      # Bootstrap API endpoint (first enrollment only)
+      - "8000:8000"
+      # mTLS gRPC control plane
+      - "50051:50051"
+    volumes:
+      # Docker socket so the API can exec into the AmneziaWG container
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Persist PKI, node identity and registry
+      - /opt/awg-api/state:/service/state
+    env_file:
+      - .env
+    networks:
+      - amnezia-dns-net   # same network as AmneziaWG
+
+networks:
+  amnezia-dns-net:
+    external: true

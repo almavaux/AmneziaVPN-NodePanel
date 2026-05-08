@@ -1,0 +1,69 @@
+syntax = "proto3";
+
+package awg;
+
+service NodeControl {
+  rpc Health(HealthRequest) returns (HealthReply);
+  rpc ListUsers(ListUsersRequest) returns (ListUsersReply);
+  rpc CreateUser(CreateUserRequest) returns (CreateUserReply);
+  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserReply);
+  rpc GetUserConfig(GetUserConfigRequest) returns (GetUserConfigReply);
+  rpc GetUserQr(GetUserQrRequest) returns (GetUserQrReply);
+}
+
+message HealthRequest {}
+
+message HealthReply {
+  string status = 1;
+  string container = 2;
+  string detail = 3;
+}
+
+message ListUsersRequest {}
+
+message User {
+  string client_id = 1;
+  string name = 2;
+  string internal_ip = 3;
+  string created_at = 4;
+  string transfer_rx = 5;
+  string transfer_tx = 6;
+  string last_handshake = 7;
+  bool is_online = 8;
+}
+
+message ListUsersReply {
+  repeated User users = 1;
+}
+
+message CreateUserRequest {
+  string name = 1;
+}
+
+message CreateUserReply {
+  User user = 1;
+  string config = 2;
+}
+
+message DeleteUserRequest {
+  string client_id = 1;
+}
+
+message DeleteUserReply {}
+
+message GetUserConfigRequest {
+  string client_id = 1;
+}
+
+message GetUserConfigReply {
+  bytes content = 1;
+  string file_name = 2;
+}
+
+message GetUserQrRequest {
+  string client_id = 1;
+}
+
+message GetUserQrReply {
+  bytes png = 1;
+}

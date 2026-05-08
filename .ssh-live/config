@@ -1,0 +1,7 @@
+Host max-live
+    HostName 5.101.82.46
+    User root
+    IdentityFile c:/git/MAX/.ssh-live/amnezia_live
+    IdentitiesOnly yes
+    StrictHostKeyChecking accept-new
+    UserKnownHostsFile c:/git/MAX/.ssh-live/known_hosts

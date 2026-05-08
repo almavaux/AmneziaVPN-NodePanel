@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AWG Master Control Panel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="layout">
+    <header class="topbar">
+      <h1 class="title">AWG Master Control Panel</h1>
+      <span id="panelVersionBadge" class="badge">M0.0.2</span>
+    </header>
+
+    <section class="card">
+      <div class="row">
+        <div class="control control-compact">
+          <button id="addNodeBtn" class="secondary">+ Add Node</button>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2 class="section-title">Managed Nodes</h2>
+      <div id="nodesGrid" class="nodes-grid">
+        <div class="card empty-state">
+          <p class="small">No nodes yet. Add one to get started.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Add Node Modal -->
+  <div id="addNodeModal" class="modal" role="dialog" aria-modal="true">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h2 class="modal-title">Add New Node</h2>
+        <button id="dismissAddNodeModal" class="modal-close ghost" type="button" aria-label="Close dialog">×</button>
+      </div>
+      <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
+
+      <!-- Step 1: Mode Selection -->
+      <div id="step1" class="wizard-step active">
+        <p class="small no-margin-top">How do you want to add this node?</p>
+        <div class="mode-actions">
+          <button id="modeAutoBtn" class="mode-button mode-button-auto">
+            <strong>Automatic Installation (SSH)</strong><br>
+            <span class="mode-button-note">Panel installs everything via SSH</span>
+          </button>
+          <button id="modeManualBtn" class="mode-button mode-button-manual">
+            <strong>Manual Setup (Command)</strong><br>
+            <span class="mode-button-note">You run installation command on your server</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Step 2a: SSH Installation -->
+      <div id="step2a" class="wizard-step">
+        <label>Node Name</label>
+        <input id="nodeName" placeholder="Production API 1" />
+        <label class="spaced-label">Server IP</label>
+        <input id="nodeIp" placeholder="192.168.1.100" />
+        <label class="spaced-label">SSH User</label>
+        <input id="sshUser" value="root" />
+        <label class="spaced-label">SSH Password</label>
+        <input id="sshPassword" type="password" />
+        <p class="small warning-text">Password will not be saved, only used for initial setup</p>
+        <div class="actions actions-spaced">
+          <button id="backBtn1" class="ghost">← Back</button>
+          <button id="installBtn">Install via SSH</button>
+        </div>
+      </div>
+
+      <!-- Step 2b: Manual Bootstrap -->
+      <div id="step2b" class="wizard-step">
+        <label>Node Name</label>
+        <input id="nodeNameManual" placeholder="Production API 2" />
+        <label class="spaced-label">Server IP</label>
+        <input id="nodeIpManual" placeholder="192.168.1.101" />
+        
+        <p class="small instructions-text">Copy and paste this command on your server:</p>
+        <div class="code-block">
+          <button id="copyBootstrapBtn" class="copy-btn ghost" type="button">Copy</button>
+          <div id="bootstrapCmd">bash -c '$(curl -fsSL http://panel:8000/install)' -- TOKEN MASTER_IP</div>
+        </div>
+
+        <div class="actions actions-spaced">
+          <button id="backBtn2" class="ghost">← Back</button>
+          <button id="createBootstrapBtn">Create Bootstrap Token</button>
+        </div>
+      </div>
+
+      <!-- Step 3: Progress/Success -->
+      <div id="step3" class="wizard-step">
+        <p id="progressMsg" class="small no-margin-top">Installation in progress...</p>
+        <div id="installLog" class="install-log"></div>
+        <div class="actions">
+          <button id="closeModal" class="ghost">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="nodeDetailsModal" class="modal" role="dialog" aria-modal="true">
+    <div class="modal-box modal-box-wide">
+      <div class="modal-header">
+        <h2 id="nodeModalTitle" class="modal-title">Node Management</h2>
+        <button id="dismissNodeModal" class="modal-close ghost" type="button" aria-label="Close node dialog">×</button>
+      </div>
+
+      <div id="nodeModalMeta" class="node-modal-meta"></div>
+
+      <div class="node-modal-toolbar">
+        <div class="node-user-form">
+          <label for="nodeUserName">Add User</label>
+          <div class="inline-form">
+            <input id="nodeUserName" placeholder="new-client" />
+            <button id="createNodeUserBtn" type="button">Add User</button>
+          </div>
+        </div>
+        <div class="actions actions-spaced">
+          <button id="refreshNodeUsersBtn" class="ghost" type="button">Refresh</button>
+          <button id="updateNodeBtn" class="ghost" type="button">Update</button>
+        </div>
+      </div>
+
+      <p id="nodeUsersState" class="small no-margin-top">Select a node to manage its users.</p>
+      <div id="nodeUsersList" class="node-users-list"></div>
+
+      <section id="nodeUserPreview" class="node-preview" hidden>
+        <div class="node-preview-header">
+          <h3 id="nodeUserPreviewTitle" class="node-preview-title">Preview</h3>
+          <button id="clearNodePreviewBtn" class="ghost" type="button">Clear</button>
+        </div>
+        <div id="nodeUserPreviewBody" class="node-preview-body"></div>
+      </section>
+
+      <div class="actions actions-spaced">
+        <button id="closeNodeModal" class="ghost" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="qrModal" class="modal" role="dialog" aria-modal="true" aria-label="QR preview">
+    <div class="modal-box modal-box-qr">
+      <div class="modal-header">
+        <h2 id="qrModalTitle" class="modal-title">User QR</h2>
+        <button id="closeQrModalBtn" class="modal-close ghost" type="button" aria-label="Close QR dialog">×</button>
+      </div>
+      <div class="qr-modal-body">
+        <img id="qrModalImage" class="qr-preview qr-preview-large" alt="User QR code" />
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
