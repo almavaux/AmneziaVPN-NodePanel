@@ -99,6 +99,9 @@ parse_args() {
 }
 
 clone_or_update_repo() {
+  local autostashed="false"
+  local stash_tag="deploy-autostash-$(date +%s)"
+
   if [ ! -d "$TARGET_DIR/.git" ]; then
     echo "==> Cloning repository to $TARGET_DIR"
     rm -rf "$TARGET_DIR"
@@ -109,11 +112,27 @@ clone_or_update_repo() {
   echo "==> Updating repository in $TARGET_DIR"
   git -C "$TARGET_DIR" remote set-url origin "$REPO_URL"
   git -C "$TARGET_DIR" fetch --all --prune
+
+  if [ "$FORCE" != "true" ]; then
+    if ! git -C "$TARGET_DIR" diff --quiet || ! git -C "$TARGET_DIR" diff --cached --quiet; then
+      echo "Local changes detected, saving them before update..."
+      git -C "$TARGET_DIR" stash push --include-untracked -m "$stash_tag" >/dev/null
+      autostashed="true"
+    fi
+  fi
+
   git -C "$TARGET_DIR" checkout "$BRANCH"
   if [ "$FORCE" = "true" ]; then
     git -C "$TARGET_DIR" reset --hard "origin/$BRANCH"
   else
     git -C "$TARGET_DIR" pull --ff-only origin "$BRANCH"
+    if [ "$autostashed" = "true" ]; then
+      echo "Restoring local changes after update..."
+      if ! git -C "$TARGET_DIR" stash pop >/dev/null; then
+        echo "WARNING: couldn't auto-apply stashed changes cleanly." >&2
+        echo "Resolve conflicts manually, then run: git -C \"$TARGET_DIR\" stash list" >&2
+      fi
+    fi
   fi
 }
 
