@@ -332,6 +332,17 @@ def _split_dns_pair() -> tuple[str, str]:
     return parts[0], parts[1]
 
 
+def _extract_subnet_address(iface_addr: str) -> str:
+    """Return network base address from interface CIDR string."""
+    try:
+        cidr = (iface_addr or "").split(",", 1)[0].strip()
+        if not cidr:
+            return ""
+        return str(ipaddress.ip_network(cidr, strict=False).network_address)
+    except ValueError:
+        return ""
+
+
 def _build_amnezia_vpn_config(
     *,
     client_name: str,
@@ -394,6 +405,8 @@ def _build_amnezia_vpn_config(
         "S4": client_payload["S4"],
         "last_config": raw_config,
         "port": str(iface["ListenPort"]),
+        "protocol_version": "2",
+        "subnet_address": _extract_subnet_address(str(iface.get("Address", ""))),
         "transport_proto": "udp",
     }
     dns1, dns2 = _split_dns_pair()
@@ -409,7 +422,6 @@ def _build_amnezia_vpn_config(
         "dns1": dns1,
         "dns2": dns2,
         "hostName": settings.server_host,
-        "nameOverriddenByUser": True,
     }
     return json.dumps(profile, ensure_ascii=False, separators=(",", ":"))
 
