@@ -481,7 +481,7 @@ def _build_amnezia_vpn_config(
             }
         ],
         "defaultContainer": "amnezia-awg2" if _MODE == "new" else "amnezia-awg",
-        "description": client_name,
+        "description": settings.server_host or "AmneziaWG",
         "dns1": dns1,
         "dns2": dns2,
         "hostName": settings.server_host,

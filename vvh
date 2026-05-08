@@ -18,6 +18,8 @@ Usage:
   vvh status
   vvh logs
   vvh role [master|node]
+  vvh enable
+  vvh disable
 
 Notes:
   - install         = full install as master (default)
@@ -26,6 +28,7 @@ Notes:
   - reinstall       = full clean reinstall (keeps current role if .env exists)
   - role            = toggle current role (master <-> node)
   - role master|node = set explicit role and restart
+  - enable/disable  = start/stop panel services
 EOF
 }
 
@@ -103,6 +106,30 @@ stop_stack() {
   fi
 }
 
+is_panel_enabled() {
+  docker ps --format '{{.Names}}' 2>/dev/null | grep -Fxq 'awg-api'
+}
+
+enable_panel() {
+  require_installed
+  if is_panel_enabled; then
+    echo "Panel is already enabled."
+    return 0
+  fi
+  echo "==> Enabling panel"
+  restart_stack
+}
+
+disable_panel() {
+  require_installed
+  if ! is_panel_enabled; then
+    echo "Panel is already disabled."
+    return 0
+  fi
+  echo "==> Disabling panel"
+  stop_stack
+}
+
 wipe_state() {
   # Role-specific PKI/identity is incompatible across roles, so wipe it on switch.
   rm -rf "$APP_DIR/state"
@@ -141,18 +168,30 @@ do_uninstall() {
 }
 
 do_status() {
-  local cmd
-  cmd="$(resolve_compose)"
-  if [ -f "$COMPOSE_FILE" ] && [ -n "$cmd" ]; then
-    eval "$cmd ps" || true
-  elif container_exists; then
-    docker ps --filter "name=awg-api"
-  else
-    echo "Container awg-api is not present (panel not installed?)."
+  local installed="no"
+  local role="unknown"
+  local panel_state="disabled"
+  local health_state="unreachable"
+
+  if [ -f "$APP_DIR/.env" ] && [ -f "$COMPOSE_FILE" ]; then
+    installed="yes"
+    role="$(current_role 2>/dev/null || echo unknown)"
   fi
+
+  if is_panel_enabled; then
+    panel_state="enabled (running)"
+  fi
+
+  if curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1; then
+    health_state="ok"
+  fi
+
   echo ""
-  echo "Role: $(current_role 2>/dev/null || echo unknown)"
-  curl -fsS http://127.0.0.1:8000/health || echo "Health: API not reachable on http://127.0.0.1:8000"
+  echo "=== Panel status ==="
+  echo "Installed : $installed"
+  echo "Role      : $role"
+  echo "Panel     : $panel_state"
+  echo "Health    : $health_state (http://127.0.0.1:8000/health)"
   echo ""
 }
 
@@ -288,7 +327,19 @@ do_install() {
 menu() {
   while true; do
     local cur
+    local role_action
+    local panel_action
     cur="$(current_role 2>/dev/null || echo unknown)"
+    if [ "$cur" = "master" ]; then
+      role_action="Switch role to Node"
+    else
+      role_action="Switch role to Master"
+    fi
+    if is_panel_enabled; then
+      panel_action="Disable panel"
+    else
+      panel_action="Enable panel"
+    fi
     echo ""
     echo "=== vespervauxhall (vvh) ==="
     echo "Current role: $cur"
@@ -299,9 +350,10 @@ menu() {
     echo "5) Uninstall panel"
     echo "6) Status"
     echo "7) Logs"
-    echo "8) Switch role (master <-> node)"
-    echo "9) Exit"
-    read -r -p "Select option [1-9]: " answer
+    echo "8) $role_action"
+    echo "9) $panel_action"
+    echo "0) Exit"
+    read -r -p "Select option [0-9]: " answer
     case "$answer" in
       1) do_install master ;;
       2) do_install node ;;
@@ -311,7 +363,14 @@ menu() {
       6) do_status ;;
       7) do_logs ;;
       8) do_role ;;
-      9) exit 0 ;;
+      9)
+        if is_panel_enabled; then
+          disable_panel
+        else
+          enable_panel
+        fi
+        ;;
+      0) exit 0 ;;
       *) echo "Unknown option" ;;
     esac
   done
@@ -328,6 +387,8 @@ main() {
     status) do_status ;;
     logs) do_logs ;;
     role) shift || true; do_role "${1:-}" ;;
+    enable) enable_panel ;;
+    disable) disable_panel ;;
     -h|--help|help) usage ;;
     *)
       echo "Unknown command: $cmd" >&2

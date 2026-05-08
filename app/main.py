@@ -1,11 +1,15 @@
 import json
+import base64
+import io
 import logging
+import zlib
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib import error as urlerror
 from urllib import request as urlrequest
 
 import grpc
+import qrcode
 from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -14,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from .core.config import settings
 from .infrastructure.docker_manager import docker_manager
 from .core.awg_manager import detect_mode
-from .core.db import SessionLocal, init_db
+from .core.db import SessionLocal, Node, init_db
 from .infrastructure import grpc_client
 from .infrastructure.grpc_server import grpc_node_server
 from .core.identity import load_or_create_node_id
@@ -166,6 +170,47 @@ def _grpc_error(exc: grpc.RpcError, host: str) -> HTTPException:
     return HTTPException(status_code=500, detail=f"gRPC error from node {host}: {detail}")
 
 
+def _node_name_by_host(host: str) -> str | None:
+    session = SessionLocal()
+    try:
+        row = session.query(Node).filter_by(ip=host).first()
+        return row.name if row and row.name else None
+    finally:
+        session.close()
+
+
+def _rewrite_vpn_description(vpn_link: str, description: str | None) -> str:
+    if not description or not isinstance(vpn_link, str) or not vpn_link.startswith("vpn://"):
+        return vpn_link
+    try:
+        token = vpn_link[len("vpn://") :]
+        raw = base64.urlsafe_b64decode(token + "=" * (-len(token) % 4))
+        payload = zlib.decompress(raw[4:])
+        profile = json.loads(payload.decode("utf-8"))
+        profile["description"] = description
+        encoded = json.dumps(profile, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        packed = len(encoded).to_bytes(4, "big") + zlib.compress(encoded)
+        return "vpn://" + base64.urlsafe_b64encode(packed).decode("utf-8").rstrip("=")
+    except Exception as exc:
+        logger.warning("Failed to rewrite vpn description: %s", exc)
+        return vpn_link
+
+
+def _build_qr_png(payload: str) -> bytes:
+    qr = qrcode.QRCode(
+        version=None,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=10,
+        border=4,
+    )
+    qr.add_data(payload)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
 @app.get("/", include_in_schema=False)
 def panel_index() -> FileResponse:
     """Serve the web control panel."""
@@ -265,6 +310,8 @@ def panel_create_node(body: dict, target: str = Query(..., description="Target n
         reply = grpc_client.create_user(host, name)
     except grpc.RpcError as exc:
         raise _grpc_error(exc, host)
+    node_name = _node_name_by_host(host)
+    config = _rewrite_vpn_description(reply.config, node_name)
 
     return {
         "user": {
@@ -274,7 +321,7 @@ def panel_create_node(body: dict, target: str = Query(..., description="Target n
             "created_at": reply.user.created_at,
         },
         "user_key": reply.user.client_id,
-        "config": reply.config,
+        "config": config,
     }
 
 
@@ -297,9 +344,11 @@ def panel_node_config(client_id: str, target: str = Query(..., description="Targ
         reply = grpc_client.get_user_config(host, client_id)
     except grpc.RpcError as exc:
         raise _grpc_error(exc, host)
+    node_name = _node_name_by_host(host)
+    content = _rewrite_vpn_description(reply.content.decode("utf-8"), node_name).encode("utf-8")
 
     return Response(
-        content=reply.content,
+        content=content,
         media_type="text/plain",
         headers={"Content-Disposition": f'attachment; filename="{client_id[:8]}.vpn"'},
     )
@@ -310,11 +359,12 @@ def panel_node_qr(client_id: str, target: str = Query(..., description="Target n
     _require_master()
     host = _normalize_target(target)
     try:
-        reply = grpc_client.get_user_qr(host, client_id)
+        reply = grpc_client.get_user_config(host, client_id)
     except grpc.RpcError as exc:
         raise _grpc_error(exc, host)
-
-    return Response(content=reply.png, media_type="image/png")
+    node_name = _node_name_by_host(host)
+    content = _rewrite_vpn_description(reply.content.decode("utf-8"), node_name)
+    return Response(content=_build_qr_png(content), media_type="image/png")
 
 
 @app.get("/health", tags=["health"])
