@@ -3,6 +3,7 @@ set -euo pipefail
 
 APP_DIR="/opt/awg-api"
 REPO_URL="https://github.com/almavaux/AmneziaVPN-NodePanel.git"
+COMPOSE_FILE="$APP_DIR/docker/docker-compose.yml"
 
 usage() {
   cat <<EOF
@@ -10,19 +11,106 @@ vespervauxhall (vvh)
 
 Usage:
   vvh menu
-  vvh install
+  vvh install [node]
   vvh update
   vvh reinstall
   vvh uninstall
   vvh status
   vvh logs
+  vvh role [master|node]
 
 Notes:
-  - install   = full install
-  - update    = safe update (keeps .env and state)
-  - reinstall = full clean reinstall
+  - install         = full install as master (default)
+  - install node    = full install as node (asks for master IP)
+  - update          = safe update (keeps .env and state)
+  - reinstall       = full clean reinstall (keeps current role if .env exists)
+  - role            = toggle current role (master <-> node)
+  - role master|node = set explicit role and restart
 EOF
 }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# helpers
+
+resolve_compose() {
+  if docker compose version >/dev/null 2>&1; then
+    echo "docker compose -f $COMPOSE_FILE"
+  elif command -v docker-compose >/dev/null 2>&1; then
+    echo "docker-compose -f $COMPOSE_FILE"
+  else
+    echo ""
+  fi
+}
+
+require_installed() {
+  if [ ! -f "$APP_DIR/.env" ] || [ ! -f "$COMPOSE_FILE" ]; then
+    echo "ERROR: panel is not installed at $APP_DIR. Run 'vvh install' first." >&2
+    exit 1
+  fi
+}
+
+current_role() {
+  local env_file="$APP_DIR/.env"
+  if [ ! -f "$env_file" ]; then
+    echo ""
+    return
+  fi
+  local r
+  r="$(grep -E '^AWG_ROLE=' "$env_file" | tail -n1 | cut -d= -f2- | tr -d '"' || true)"
+  echo "${r:-master}"
+}
+
+set_env_var() {
+  # set_env_var <file> <KEY> <value>
+  local file="$1" key="$2" value="$3"
+  if [ ! -f "$file" ]; then
+    echo "$key=$value" > "$file"
+    return
+  fi
+  if grep -qE "^${key}=" "$file"; then
+    # use a tmp file for portability across BSD/GNU sed
+    awk -v k="$key" -v v="$value" 'BEGIN{FS=OFS="="} $1==k{print k"="v; next} {print}' "$file" > "$file.tmp"
+    mv "$file.tmp" "$file"
+  else
+    echo "$key=$value" >> "$file"
+  fi
+}
+
+sync_env_to_compose() {
+  local src="$APP_DIR/.env"
+  if [ -f "$src" ]; then
+    mkdir -p "$APP_DIR/docker"
+    cp "$src" "$APP_DIR/docker/.env"
+  fi
+}
+
+restart_stack() {
+  local cmd
+  cmd="$(resolve_compose)"
+  if [ -z "$cmd" ]; then
+    echo "ERROR: docker compose is not available" >&2
+    exit 1
+  fi
+  echo "==> Restarting stack"
+  eval "$cmd up -d --force-recreate"
+}
+
+stop_stack() {
+  local cmd
+  cmd="$(resolve_compose)"
+  if [ -n "$cmd" ]; then
+    eval "$cmd down --remove-orphans" >/dev/null 2>&1 || true
+  fi
+}
+
+wipe_state() {
+  # Role-specific PKI/identity is incompatible across roles, so wipe it on switch.
+  rm -rf "$APP_DIR/state"
+  mkdir -p "$APP_DIR/state"
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# install / update / lifecycle
 
 run_deploy() {
   local mode="$1"
@@ -34,51 +122,196 @@ run_deploy() {
   bash "$APP_DIR/deploy.sh" "$mode" --repo "$REPO_URL" --dir "$APP_DIR"
 }
 
+container_exists() {
+  docker ps -a --format '{{.Names}}' 2>/dev/null | grep -Fxq 'awg-api'
+}
+
 do_uninstall() {
   echo "==> Uninstalling panel"
-  if [ -f "$APP_DIR/docker/docker-compose.yml" ]; then
-    docker compose -f "$APP_DIR/docker/docker-compose.yml" down --remove-orphans || true
+  local cmd
+  cmd="$(resolve_compose)"
+  if [ -f "$COMPOSE_FILE" ] && [ -n "$cmd" ]; then
+    eval "$cmd down --remove-orphans" || true
   fi
-  docker rm -f awg-api >/dev/null 2>&1 || true
+  if container_exists; then
+    docker rm -f awg-api >/dev/null 2>&1 || true
+  fi
   rm -rf "$APP_DIR"
-  echo "Done. /opt/awg-api removed."
+  echo "Done. $APP_DIR removed."
 }
 
 do_status() {
-  if [ -f "$APP_DIR/docker/docker-compose.yml" ]; then
-    docker compose -f "$APP_DIR/docker/docker-compose.yml" ps || true
+  local cmd
+  cmd="$(resolve_compose)"
+  if [ -f "$COMPOSE_FILE" ] && [ -n "$cmd" ]; then
+    eval "$cmd ps" || true
+  elif container_exists; then
+    docker ps --filter "name=awg-api"
   else
-    docker ps --filter "name=awg-api" || true
+    echo "Container awg-api is not present (panel not installed?)."
   fi
   echo ""
-  curl -fsS http://127.0.0.1:8000/health || true
+  echo "Role: $(current_role 2>/dev/null || echo unknown)"
+  curl -fsS http://127.0.0.1:8000/health || echo "Health: API not reachable on http://127.0.0.1:8000"
   echo ""
 }
 
 do_logs() {
+  if ! container_exists; then
+    echo "Container awg-api not found. Run 'vvh install' first."
+    return 1
+  fi
   docker logs --tail 100 -f awg-api
 }
 
+# ──────────────────────────────────────────────────────────────────────────────
+# role management
+
+apply_role() {
+  # apply_role <new_role> [master_ip]
+  local new_role="$1"
+  local master_ip="${2:-}"
+  local env_file="$APP_DIR/.env"
+
+  case "$new_role" in
+    master|node) ;;
+    *) echo "ERROR: role must be 'master' or 'node'" >&2; return 1 ;;
+  esac
+
+  require_installed
+
+  local cur
+  cur="$(current_role)"
+  if [ "$cur" = "$new_role" ]; then
+    echo "Role is already '$new_role'. Nothing to do."
+    return 0
+  fi
+
+  if [ "$new_role" = "node" ] && [ -z "$master_ip" ]; then
+    read -r -p "Master IP for this node: " master_ip
+    if [ -z "$master_ip" ]; then
+      echo "ERROR: master IP is required for node role" >&2
+      return 1
+    fi
+  fi
+
+  echo "==> Switching role: $cur -> $new_role"
+  echo "    State at $APP_DIR/state will be wiped (PKI/node identity/registry)."
+  read -r -p "Continue? [y/N]: " ans
+  case "$ans" in
+    y|Y|yes|YES) ;;
+    *) echo "Cancelled."; return 0 ;;
+  esac
+
+  set_env_var "$env_file" "AWG_ROLE" "$new_role"
+  if [ "$new_role" = "node" ]; then
+    set_env_var "$env_file" "AWG_MASTER_IP" "$master_ip"
+  else
+    # master ignores AWG_MASTER_IP; clear it to avoid confusion
+    set_env_var "$env_file" "AWG_MASTER_IP" ""
+  fi
+
+  sync_env_to_compose
+  stop_stack
+  wipe_state
+  restart_stack
+
+  echo ""
+  echo "Done. Role is now '$new_role'."
+  if [ "$new_role" = "master" ]; then
+    echo "Web panel: http://127.0.0.1:8000  (Node management is now available)"
+  else
+    echo "Bootstrap is enabled. From master panel: add this node by its IP."
+  fi
+}
+
+do_role() {
+  # do_role               -> toggle
+  # do_role master|node   -> set explicit
+  require_installed
+
+  local target="${1:-}"
+  local cur
+  cur="$(current_role)"
+
+  if [ -z "$target" ]; then
+    if [ "$cur" = "master" ]; then
+      target="node"
+    else
+      target="master"
+    fi
+  fi
+
+  apply_role "$target"
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# install entry points
+
+do_install() {
+  # do_install                -> install as master (default)
+  # do_install node           -> install as node (will prompt for master IP)
+  local target_role="${1:-master}"
+
+  case "$target_role" in
+    master|node) ;;
+    *) echo "ERROR: install role must be 'master' or 'node'" >&2; exit 1 ;;
+  esac
+
+  local master_ip=""
+  if [ "$target_role" = "node" ]; then
+    read -r -p "Master IP for this node: " master_ip
+    if [ -z "$master_ip" ]; then
+      echo "ERROR: master IP is required for node role" >&2
+      exit 1
+    fi
+  fi
+
+  run_deploy install
+
+  if [ "$target_role" = "node" ]; then
+    # The default install lands as master (per .env.example). Switch to node now.
+    set_env_var "$APP_DIR/.env" "AWG_ROLE" "node"
+    set_env_var "$APP_DIR/.env" "AWG_MASTER_IP" "$master_ip"
+    sync_env_to_compose
+    stop_stack
+    wipe_state
+    restart_stack
+    echo ""
+    echo "Done. Installed as node. Master: $master_ip"
+  fi
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# menu
+
 menu() {
   while true; do
+    local cur
+    cur="$(current_role 2>/dev/null || echo unknown)"
     echo ""
     echo "=== vespervauxhall (vvh) ==="
-    echo "1) Install panel"
-    echo "2) Update panel"
-    echo "3) Reinstall panel (clean)"
-    echo "4) Uninstall panel"
-    echo "5) Status"
-    echo "6) Logs"
-    echo "7) Exit"
-    read -r -p "Select option [1-7]: " answer
+    echo "Current role: $cur"
+    echo "1) Install panel (master)"
+    echo "2) Install as node"
+    echo "3) Update panel"
+    echo "4) Reinstall panel (clean)"
+    echo "5) Uninstall panel"
+    echo "6) Status"
+    echo "7) Logs"
+    echo "8) Switch role (master <-> node)"
+    echo "9) Exit"
+    read -r -p "Select option [1-9]: " answer
     case "$answer" in
-      1) run_deploy install ;;
-      2) run_deploy update ;;
-      3) run_deploy install ;;
-      4) do_uninstall ;;
-      5) do_status ;;
-      6) do_logs ;;
-      7) exit 0 ;;
+      1) do_install master ;;
+      2) do_install node ;;
+      3) run_deploy update ;;
+      4) run_deploy install ;;
+      5) do_uninstall ;;
+      6) do_status ;;
+      7) do_logs ;;
+      8) do_role ;;
+      9) exit 0 ;;
       *) echo "Unknown option" ;;
     esac
   done
@@ -88,12 +321,13 @@ main() {
   local cmd="${1:-menu}"
   case "$cmd" in
     menu) menu ;;
-    install) run_deploy install ;;
+    install) shift || true; do_install "${1:-master}" ;;
     update) run_deploy update ;;
     reinstall) run_deploy install ;;
     uninstall) do_uninstall ;;
     status) do_status ;;
     logs) do_logs ;;
+    role) shift || true; do_role "${1:-}" ;;
     -h|--help|help) usage ;;
     *)
       echo "Unknown command: $cmd" >&2

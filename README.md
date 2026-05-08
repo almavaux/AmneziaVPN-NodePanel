@@ -19,16 +19,26 @@ vvh menu
 Или напрямую:
 
 ```bash
+vvh install            # установить как master (по умолчанию)
+vvh install node       # установить как node (спросит master IP)
 vvh update
 vvh reinstall
 vvh uninstall
 vvh status
 vvh logs
+vvh role               # переключить роль master <-> node
+vvh role master        # явно поставить master
+vvh role node          # явно поставить node (спросит master IP)
 ```
+
+При смене роли `vvh role` останавливает контейнер, чистит `state/` (PKI/идентичность ноды/реестр),
+переписывает `AWG_ROLE` (и `AWG_MASTER_IP` при роли `node`) и поднимает стек заново.
 
 ## Ноды
 
 Node устанавливается и обновляется только из панели.
+Если хочется развернуть саму ноду этим же дистрибутивом панели — используйте `vvh install node`
+или переключите уже установленную панель в режим ноды через `vvh role node`.
 
 ## Что важно
 
@@ -40,7 +50,7 @@ Node устанавливается и обновляется только из 
 
 ## Master/Node control plane (gRPC + mTLS)
 
-- `master` хранит веб-панель и локальный CA
+- `master` хранит веб-панель и локальный CA (роль по умолчанию)
 - `node` после установки ждёт первичного подключения от master
 - при подключении из панели master автоматически выполняет enrollment:
   - получает CSR с node
@@ -50,8 +60,9 @@ Node устанавливается и обновляется только из 
 
 Базовый поток:
 
-1. Установить master (`AWG_ROLE=master`)
-2. Установить node (`AWG_ROLE=node`, `AWG_MASTER_IP=<ip-master>`)
+1. Установить master: `vvh install` (роль `master` берётся по умолчанию)
+2. Установить node: `vvh install node` (запросит `master IP`)
+   либо переключить уже установленную панель: `vvh role node`
 3. В панели master указать IP node и нажать `Connect node API`
 
 После первичного подключения ручной ввод API key, port и scheme больше не нужен.
@@ -140,21 +151,28 @@ cd /opt/awg-api
 cp .env.example .env
 ```
 
-Отредактировать `.env`:
+Отредактировать `.env` (минимум — заменить `AWG_API_KEY`):
 
 ```env
 AWG_API_KEY=ваш-секретный-ключ         # обязательно поменять!
-AWG_SERVER_HOST=5.101.82.46            # внешний IP сервера (для Endpoint в конфиге клиента)
-AWG_ALLOWED_IPS=203.0.113.10           # кто может вызывать API (обязательно в проде)
+AWG_SERVER_HOST=                       # пусто = автодетект публичного IP при установке
+AWG_ALLOWED_IPS=                       # пусто = фильтр выключен, авторизация только по X-API-Key
 AWG_CONTAINER_NAME=amnezia-awg2        # имя Docker-контейнера с AmneziaWG
 AWG_DNS=1.1.1.1                        # DNS для клиентов
 ```
 
+`AWG_SERVER_HOST` — публичный IP/хост этого сервера. Идёт в `Endpoint` клиентских WG-конфигов и в SAN мастер-CA.
+Если оставить пустым, `install_project.sh` сам подтянет IP через `ifconfig.me`/`ipify`/`icanhazip` при первой установке.
+Переопределяй вручную только если автодетект промахнулся (например, сервер за NAT и нужен внешний хост).
+
+`AWG_ALLOWED_IPS` — IP allow-list для вызывающих API. Пусто — пускаем всех с правильным `X-API-Key`.
 Можно указать несколько адресов через запятую:
 
 ```env
 AWG_ALLOWED_IPS=203.0.113.10,10.0.0.5
 ```
+
+На ноде это поле заполняется автоматически панелью при `Connect node API` (туда подставляется IP мастера).
 
 Сгенерировать безопасный ключ:
 
@@ -404,8 +422,8 @@ server {
 | Переменная | По умолчанию | Описание |
 |---|---|---|
 | `AWG_API_KEY` | `change-me` | Секретный ключ для `X-API-Key` |
-| `AWG_SERVER_HOST` | `5.101.82.46` | Внешний IP сервера (Endpoint в клиентском конфиге) |
-| `AWG_ALLOWED_IPS` | `` | Разрешённые IP API-клиентов (через запятую) |
+| `AWG_SERVER_HOST` | `` | Внешний IP сервера (Endpoint в клиентском конфиге). Пусто → автодетект при установке |
+| `AWG_ALLOWED_IPS` | `` | Разрешённые IP API-клиентов (через запятую). Пусто — фильтр выключен |
 | `AWG_CONTAINER_NAME` | `amnezia-awg2` | Имя Docker-контейнера AmneziaWG |
 | `AWG_CONF_PATH` | `/opt/amnezia/awg/awg0.conf` | Путь к конфигу внутри контейнера |
 | `AWG_CLIENTS_TABLE_PATH` | `/opt/amnezia/awg/clientsTable` | Путь к метаданным клиентов |

@@ -5,8 +5,8 @@ class Settings(BaseSettings):
     panel_version: str = "M0.0.2"
     node_version: str = "N0.0.2"
 
-    # Deployment role
-    role: str = "node"
+    # Deployment role: "master" or "node". Default is master (panel + CA).
+    role: str = "master"
 
     # Authentication
     api_key: str = "change-me"
@@ -22,9 +22,11 @@ class Settings(BaseSettings):
     server_pubkey_path: str = "/opt/amnezia/awg/wireguard_server_public_key.key"
 
     # Network
-    server_host: str = "5.101.82.46"
+    # Public IP/host of this server (Endpoint in client WG configs, master CA SAN).
+    # Empty by default; installer auto-detects the public IP at install time.
+    server_host: str = ""
     dns: str = "1.1.1.1,1.0.0.1"
-    # Comma-separated API caller allowlist. Example: "203.0.113.10,10.0.0.5"
+    # Comma-separated API caller allowlist. Empty = filter off. Example: "203.0.113.10,10.0.0.5"
     allowed_ips: str = ""
 
     # Optional: Docker socket

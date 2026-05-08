@@ -205,6 +205,55 @@ if [ ! -f ".env" ]; then
   fi
 fi
 
+detect_public_ip() {
+  local url ip
+  for url in https://api.ipify.org https://ifconfig.me https://ipinfo.io/ip https://icanhazip.com; do
+    ip="$(curl -fsS --max-time 3 "$url" 2>/dev/null | tr -d '[:space:]' || true)"
+    if [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      echo "$ip"
+      return 0
+    fi
+  done
+  return 1
+}
+
+ensure_server_host() {
+  local env_file="$1"
+  [ -f "$env_file" ] || return 0
+
+  local current
+  if grep -qE '^AWG_SERVER_HOST=' "$env_file"; then
+    current="$(grep -E '^AWG_SERVER_HOST=' "$env_file" | tail -n1 | cut -d= -f2- | tr -d '"' || true)"
+  else
+    current=""
+  fi
+
+  if [ -n "$current" ]; then
+    echo "==> AWG_SERVER_HOST=$current (kept)"
+    return 0
+  fi
+
+  echo "==> AWG_SERVER_HOST is empty, detecting public IP..."
+  local ip
+  if ip="$(detect_public_ip)"; then
+    if grep -qE '^AWG_SERVER_HOST=' "$env_file"; then
+      awk -v v="$ip" '
+        BEGIN{FS=OFS="="}
+        $1=="AWG_SERVER_HOST"{print "AWG_SERVER_HOST="v; next}
+        {print}
+      ' "$env_file" > "$env_file.tmp"
+      mv "$env_file.tmp" "$env_file"
+    else
+      echo "AWG_SERVER_HOST=$ip" >> "$env_file"
+    fi
+    echo "==> Detected public IP: $ip"
+  else
+    echo "WARNING: could not detect public IP. Set AWG_SERVER_HOST manually in $env_file"
+  fi
+}
+
+ensure_server_host "$PROJECT_DIR/.env"
+
 # docker-compose v1 resolves .env next to compose file path.
 # Keep a synced copy in docker/.env for compatibility.
 if [ -f ".env" ]; then
