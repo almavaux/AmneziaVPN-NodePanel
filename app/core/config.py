@@ -2,8 +2,8 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    panel_version: str = "M0.0.2"
-    node_version: str = "N0.0.2"
+    panel_version: str = "M0.0.3"
+    node_version: str = "N0.0.3"
 
     # Deployment role: "master" or "node". Default is master (panel + CA).
     role: str = "master"
