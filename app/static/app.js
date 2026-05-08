@@ -214,7 +214,7 @@ function renderNodeMeta(node) {
   nodeModalMeta.innerHTML = [
     `<span class="meta-chip">IP: ${escapeHtml(node.ip)}</span>`,
     `<span class="meta-chip">Status: ${escapeHtml(node.status)}</span>`,
-    `<span class="meta-chip">Version: ${escapeHtml(node.node_version || "N0.0.1")}</span>`,
+    `<span class="meta-chip">Version: ${escapeHtml(node.node_version || "N0.0.3")}</span>`,
     `<span class="meta-chip">Node ID: ${escapeHtml(node.node_id || "pending")}</span>`,
   ].join("");
 }
@@ -245,7 +245,7 @@ function pollNodeTask(nodeId) {
 
       if (data.task_status === "success") {
         clearInterval(interval);
-        updateNodeUsersState(`Node updated to ${data.node.node_version || "N0.0.1"}.`, "success");
+        updateNodeUsersState(`Node updated to ${data.node.node_version || "N0.0.3"}.`, "success");
         updateNodeBtn.disabled = false;
         await loadNodes();
         if (selectedNodeId === nodeId) {
@@ -460,7 +460,7 @@ function renderNodes(nodes) {
           </div>
           <div class="node-name">${escapeHtml(node.name)}</div>
           <div class="node-ip">${escapeHtml(node.ip)}</div>
-          <p class="small">Version: ${escapeHtml(node.node_version || "N0.0.1")}</p>
+          <p class="small">Version: ${escapeHtml(node.node_version || "N0.0.3")}</p>
           <p class="small">ID: ${escapeHtml(node.node_id || "pending")}</p>
         </div>
       `,
