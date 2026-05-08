@@ -362,17 +362,19 @@ def _build_amnezia_vpn_config(
         iface=iface,
         interface_comments=interface_comments,
     )
-    sampled_h: dict[str, str] = {}
+    profile_h_values: dict[str, str] = {}
     for key in ("H1", "H2", "H3", "H4"):
         if key in iface and str(iface[key]).strip():
-            sampled_h[key] = str(_pick_h(str(iface[key])))
+            # Keep original range form in vpn:// payload ("min-max"), as produced by
+            # the official app export. last_config already contains concrete sampled values.
+            profile_h_values[key] = str(iface[key]).strip()
 
     special_junk = _extract_special_junk(interface_comments or [])
     if _MODE == "legacy" and not special_junk.get("I1"):
         special_junk["I1"] = _LEGACY_DEFAULT_SPECIAL_JUNK_1
 
     client_payload = {
-        **sampled_h,
+        **profile_h_values,
         "Jc": str(iface.get("Jc", "0")),
         "Jmax": str(iface.get("Jmax", "0")),
         "Jmin": str(iface.get("Jmin", "0")),
